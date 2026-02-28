@@ -300,10 +300,19 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Navbar Overlay */}
       <div className="overlay-navbar">
-        <h1>Zubi</h1>
+        <div className="brand">
+          <h1>Speak With Zubi</h1>
+        </div>
+        
+        <div className="status-badge">
+          <div className={`status-dot ${status === 'connected' ? 'connected' : ''}`} />
+          <span className="status-text">{status}</span>
+        </div>
       </div>
 
+      {/* 3D Model */}
       <iframe
         ref={iframeRef}
         id="api-frame"
@@ -315,33 +324,47 @@ function App() {
         title="Zubi"
       />
 
+      {/* Footer Overlay */}
       <div className="overlay-footer">
-          <div className="footer-buttons" style={{ flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button onClick={() => playAnimation(ANIMATIONS.IDLE)}>Idle</button>
-              <button onClick={() => playAnimation(ANIMATIONS.TALK)}>Talk</button>
-              <button onClick={() => playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND])}>Jump Combo</button>
-              <button onClick={() => playOneShot(ANIMATIONS.ROLL)}>Roll</button>
-              <button onClick={() => playOneShot(ANIMATIONS.SUCCESS)}>Success</button>
-              <button onClick={() => playOneShot(ANIMATIONS.SLEEP)}>Sleep</button>
-              <button onClick={() => playOneShot(ANIMATIONS.WALK)}>Walk</button>
-              <button onClick={() => playOneShot(ANIMATIONS.RUN)}>Run</button>
-          </div>
-      </div>
+        
+        {/* Primary Interaction: Talk */}
+        <div className="controls-container">
+            <button 
+              className={`record-button ${isRecording ? 'recording' : ''}`}
+              onMouseDown={handleStartRecording} 
+              onMouseUp={stopRecording}
+              onTouchStart={(e) => { e.preventDefault(); handleStartRecording(); }}
+              onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+              aria-label={isRecording ? "Stop Recording" : "Start Recording"}
+            >
+              {/* Mic Icon SVG */}
+              {isRecording ? (
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width: '32px', height: '32px'}}>
+                    <rect x="9" y="9" width="6" height="6" />
+                 </svg>
+              ) : (
+                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width: '32px', height: '32px'}}>
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                 </svg>
+              )}
+            </button>
+            <div className="record-hint">{isRecording ? "Listening..." : "Hold to Talk"}</div>
+        </div>
 
-      <div className="status-indicator">
-          Status: {status}
-      </div>
-
-      <div className="controls-overlay">
-        <button 
-          className={`record-button ${isRecording ? 'recording' : ''}`}
-          onMouseDown={handleStartRecording} 
-          onMouseUp={stopRecording}
-          onTouchStart={(e) => { e.preventDefault(); handleStartRecording(); }}
-          onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
-        >
-          {isRecording ? "Listening..." : "Hold to Talk"}
-        </button>
+        {/* Secondary Actions: Animations */}
+        <div className="footer-buttons">
+            <button className="anim-btn" onClick={() => playAnimation(ANIMATIONS.IDLE)}>Idle</button>
+            <button className="anim-btn" onClick={() => playAnimation(ANIMATIONS.TALK)}>Talk</button>
+            <button className="anim-btn" onClick={() => playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND])}>Jump</button>
+            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.ROLL)}>Roll</button>
+            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.SUCCESS)}>Success</button>
+            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.SLEEP)}>Sleep</button>
+            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.WALK)}>Walk</button>
+            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.RUN)}>Run</button>
+        </div>
       </div>
     </div>
   );
