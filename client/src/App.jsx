@@ -1,35 +1,350 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useEffect, useRef, useState, useCallback } from 'react';
+import './App.css';
+import { useAudioRecorder } from './useAudioRecorder';
+
+// Animation UIDs
+const ANIMATIONS = {
+  STATIC_POSE: '-1',
+  IDLE: '91a0b6d7d39e446e935ed3139ea0134d',
+  IDLE_2: '90d5fbae51784239a966c3b0e89a96d1',
+  TALK: 'a10b0855f5834b2d9bac33ba2dd35948',
+  WALK: '7ae8e0f43a904d6c85cac6a36f708338',
+  RUN: '9dd80f3ab1ba4596820fa83970e7b507',
+  ROLL: 'b5f260babc5644d8a28996a4d7e9a89',
+  JUMP_UP: '5c1dac80c2ca478f8afd9a04a80ca7bb',
+  FALL: '7814ef0da1c94210aab4c2cd6f5e0004',
+  LAND: 'c184dda2155544a9bec2bece95f0aeec',
+  FAILURE: 'd12051c5731b403cb13051aea5ca101a',
+  SUCCESS: 'c83f524e33674b6a8263034580affa26',
+  SLEEP: 'c78cb50616cd4d1e83fa0590e5306eef'
+};
+
+// Model ID
+const MODEL_UID = '52401c7067f54ff3813da84df073b5f6';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const iframeRef = useRef(null);
+  const apiRef = useRef(null);
+  const wsRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const audioQueueRef = useRef([]);
+  const isPlayingRef = useRef(false);
+  const sequenceQueueRef = useRef([]);
+
+  const [status, setStatus] = useState('Disconnected');
+
+  // --- Animation Helpers ---
+
+  // Basic play function
+  const playAnimation = useCallback((uid, loop = true) => {
+      if (!apiRef.current) return;
+      
+      apiRef.current.setCurrentAnimationByUID(uid, (err) => {
+          if (err) {
+              console.error("Set animation error", err);
+              return;
+          }
+          // 'one' means play the current animation.
+          // We set 'one' to stick to this animation.
+          // Sketchfab 1.12.1 loops the current animation if passing 'one'.
+          // To NOT loop (play once), we rely on 'animationEnded' to switch away.
+          apiRef.current.setCycleMode('one'); 
+          apiRef.current.play();
+      });
+  }, []);
+
+  // Play a sequence of animations (e.g., Jump -> Fall -> Land -> Idle)
+  const playSequence = useCallback((uids) => {
+      if (!uids || uids.length === 0) return;
+      
+      // The sequence is the provided list + IDLE at the end to reset
+      // We take the first one to play now, and push the REST + IDLE to the queue.
+      const [first, ...rest] = uids;
+      sequenceQueueRef.current = [...rest, ANIMATIONS.IDLE];
+      
+      console.log("Starting sequence:", uids, "Queue:", sequenceQueueRef.current);
+      playAnimation(first, false); 
+  }, [playAnimation]);
+
+  // Play a single animation once, then go back to Idle
+  const playOneShot = useCallback((uid) => {
+      // Just a sequence of [UID, IDLE] - Playing UID once, then reverting to Idle
+      sequenceQueueRef.current = [ANIMATIONS.IDLE];
+      playAnimation(uid, false);
+  }, [playAnimation]);
+
+
+  // --- Audio Logic ---
+  const playNextChunk = () => {
+      if (audioQueueRef.current.length === 0) {
+          isPlayingRef.current = false;
+          // If we finished talking and NOT in a sequence, go to Idle
+          if (sequenceQueueRef.current.length === 0) {
+              playAnimation(ANIMATIONS.IDLE, true);
+          }
+          return;
+      }
+
+      isPlayingRef.current = true;
+      const buffer = audioQueueRef.current.shift();
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContextRef.current.destination);
+
+      // Only switch to TALK if we are not busy with a sequence (like jumping)
+      if (sequenceQueueRef.current.length === 0) {
+          playAnimation(ANIMATIONS.TALK, true);
+      }
+
+      source.onended = () => {
+          playNextChunk();
+      };
+      
+      source.start();
+  };
+
+  const queueAudioChunk = async (base64Data) => {
+    const binaryString = window.atob(base64Data);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    const arrayBuffer = bytes.buffer;
+
+    try {
+        if (!audioContextRef.current) return;
+        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+        audioQueueRef.current.push(audioBuffer);
+        
+        if (!isPlayingRef.current) {
+            playNextChunk();
+        }
+    } catch (e) {
+        console.error("Error decoding audio chunk:", e);
+    }
+  };
+
+
+  // --- WebSocket Setup ---
+  // Handle WebSocket triggers
+  const triggerAnimation = useCallback((toolName) => {
+      if (toolName === 'trigger_jump') {
+          playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND]);
+      } else if (toolName === 'trigger_roll') {
+          playOneShot(ANIMATIONS.ROLL);
+      } else if (toolName === 'trigger_sleep') {
+          playOneShot(ANIMATIONS.SLEEP);
+      } else if (toolName === 'trigger_success') {
+          playOneShot(ANIMATIONS.SUCCESS);
+      }
+  }, [playSequence, playOneShot]);
+
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:3001');
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      console.log('Connected');
+      setStatus('Connected');
+    };
+
+    ws.onmessage = (event) => {
+        const data = event.data;
+        if (typeof data === 'string') {
+            try {
+                const message = JSON.parse(data);
+                if (message.type === 'animation') {
+                    triggerAnimation(message.animation);
+                }
+                else if (message.type === 'audio' || message.type === 'serverContent') {
+                    const contentValues = message.data || message.content;
+                     if (contentValues?.serverContent?.modelTurn?.parts) {
+                        for (const part of contentValues.serverContent.modelTurn.parts) {
+                            if (part.inlineData && part.inlineData.mimeType.startsWith('audio')) {
+                                queueAudioChunk(part.inlineData.data);
+                            }
+                        }
+                     } else if (contentValues?.audioContent) {
+                         queueAudioChunk(contentValues.audioContent);
+                     }
+                }
+            } catch (e) {
+                console.error("Error parsing WS message", e);
+            }
+        }
+    };
+
+    ws.onclose = () => setStatus('Disconnected');
+    wsRef.current = ws;
+    
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+      if (audioContextRef.current) audioContextRef.current.close();
+    };
+  }, [triggerAnimation]);
+
+
+  // --- Sketchfab Init ---
+  const initSketchfab = useCallback(() => {
+     if (!window.Sketchfab) return;
+
+     const client = new window.Sketchfab(iframeRef.current);
+     client.init(MODEL_UID, {
+         success: (api) => {
+             apiRef.current = api;
+             api.start();
+             api.addEventListener('viewerready', () => {
+                 console.log('Sketchfab Viewer Ready');
+
+                 // Zoom out slightly AND rotate to face front
+                 api.getCameraLookAt((err, camera) => {
+                    if (!err) {
+                        const eye = camera.position;
+                        const target = camera.target;
+                        
+                        // Vector from target to eye
+                        let dx = eye[0] - target[0];
+                        let dy = eye[1] - target[1];
+                        let dz = eye[2] - target[2];
+                        
+                        // 1. Rotate 90 degrees around Z axis (assuming Z is up) to face front
+                        // If model faces Left (-X), camera is likely at -Y looking +Y, or +Y looking -Y.
+                        // We want camera at -X to look at face.
+                        // Let's just rotate the vector (dx, dy) by -90 degrees.
+                        // x' = y, y' = -x (for -90 deg rotation)
+                        // or x' = -y, y' = x (for +90 deg rotation)
+                        
+                        // Try rotating -90 degrees (clockwise from top)
+                        const scaling = 0.3; // Zoom out factor (1.5x distance)
+                        
+                        // Previous attempt rotated 90 deg and showed back.
+                        // We need to rotate 180 degrees from the previous position (which was back) to see front.
+                        // Or just rotate -90 deg from original if +90 was back.
+                        // Let's try the opposite rotation of the last change.
+                        
+                        // Original was (dx, dy).
+                        // Last time we used (-dy, dx) and got back view.
+                        // To get front view (opposite of back), we want (dy, -dx).
+                        
+                        // const scaling = 1.6; // Slightly more zoom out
+                        
+                        // Rotate 180 from back (which is -90 from original, say) -> +90 from original
+                        const rotatedDx = dy; 
+                        const rotatedDy = -dx;  
+                        
+                        const newEye = [
+                            target[0] + rotatedDx * scaling,
+                            target[1] + rotatedDy * scaling,
+                            target[2] + dz * scaling 
+                        ];
+                        
+                        api.setCameraLookAt(newEye, target, 2); 
+                    }
+                 });
+                 
+                 // LISTENER: When one animation finishes, look at queue
+                 api.addEventListener('animationEnded', () => {
+                     // Check if there is something in queue
+                     if (sequenceQueueRef.current.length > 0) {
+                         const nextUid = sequenceQueueRef.current.shift();
+                         console.log("Animation ended, playing next:", nextUid);
+                         
+                         // Cycle mode "one" is fine as playAnimation sets it.
+                         playAnimation(nextUid, true);
+                     }
+                 });
+
+                 // Initial State
+                 api.setCycleMode('one'); 
+                 playAnimation(ANIMATIONS.IDLE, true);
+             });
+         },
+         ui_controls: 0,
+         ui_infos: 0,
+         ui_inspector: 0,
+         ui_stop: 0,
+         ui_watermark: 0,
+         transparent: 1
+     });
+  }, [playAnimation]);
+
+  useEffect(() => {
+      const interval = setInterval(() => {
+          if (window.Sketchfab) {
+              clearInterval(interval);
+              initSketchfab();
+          }
+      }, 500);
+      return () => clearInterval(interval);
+  }, [initSketchfab]);
+
+  // --- UI ---
+  const { isRecording, startRecording, stopRecording } = useAudioRecorder({
+      onAudioData: (buffer) => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(buffer);
+          }
+      }
+  });
+
+  const handleStartRecording = async () => {
+      if (audioContextRef.current?.state === 'suspended') {
+          await audioContextRef.current.resume();
+      }
+      startRecording();
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="app-container">
+      <div className="overlay-navbar">
+        <h1>Zubi</h1>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
+
+      <iframe
+        ref={iframeRef}
+        id="api-frame"
+        className="sketchfab-frame"
+        allow="autoplay; fullscreen; vr"
+        allowFullScreen
+        mozallowfullscreen="true"
+        webkitallowfullscreen="true"
+        title="Zubi"
+      />
+
+      <div className="overlay-footer">
+          <div className="footer-buttons" style={{ flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button onClick={() => playAnimation(ANIMATIONS.IDLE)}>Idle</button>
+              <button onClick={() => playAnimation(ANIMATIONS.TALK)}>Talk</button>
+              <button onClick={() => playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND])}>Jump Combo</button>
+              <button onClick={() => playOneShot(ANIMATIONS.ROLL)}>Roll</button>
+              <button onClick={() => playOneShot(ANIMATIONS.SUCCESS)}>Success</button>
+              <button onClick={() => playOneShot(ANIMATIONS.SLEEP)}>Sleep</button>
+              <button onClick={() => playOneShot(ANIMATIONS.WALK)}>Walk</button>
+              <button onClick={() => playOneShot(ANIMATIONS.RUN)}>Run</button>
+          </div>
+      </div>
+
+      <div className="status-indicator">
+          Status: {status}
+      </div>
+
+      <div className="controls-overlay">
+        <button 
+          className={`record-button ${isRecording ? 'recording' : ''}`}
+          onMouseDown={handleStartRecording} 
+          onMouseUp={stopRecording}
+          onTouchStart={(e) => { e.preventDefault(); handleStartRecording(); }}
+          onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+        >
+          {isRecording ? "Listening..." : "Hold to Talk"}
         </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    </div>
+  );
 }
 
-export default App
+export default App;
