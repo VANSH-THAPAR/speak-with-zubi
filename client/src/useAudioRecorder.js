@@ -19,18 +19,26 @@ export const useAudioRecorder = ({ onAudioData }) => {
       // But for simplicity and based on "capture microphone audio in chunks", let's try standard MediaRecorder 
       // and assume the backend knows how to handle it or we send raw PCM via AudioContext.
       
-      // Let's use AudioContext for raw PCM as it's more reliable for ML APIs.
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 }); // Gemini prefers 16kHz
+      // 1. Create AudioContext
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+      
       const source = audioContext.createMediaStreamSource(stream);
+      // 2. Create Processor (deprecated but works broadly)
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
       
       source.connect(processor);
       processor.connect(audioContext.destination);
       
       processor.onaudioprocess = (e) => {
-        if (!isRecording) return;
+        // Only process if we are actively recording. 
+        // We use a ref mechanism here implicitly because standard state inside this closure might be stale.
+        // Actually, since we stop via mediaRecorder.current.stop(), we can just process always while running.
         
         const inputData = e.inputBuffer.getChannelData(0);
+        // Resample/Convert if needed. Here we assume 16kHz context.
         // Convert float32 to int16 PCM
         const pcmBuffer = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
@@ -38,12 +46,9 @@ export const useAudioRecorder = ({ onAudioData }) => {
           pcmBuffer[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
         }
         
-        // Convert to Buffer/Uint8Array to send
-        const buffer = pcmBuffer.buffer;
-        
-        // Send to callback
+        // Callback with the raw buffer
         if (onAudioData) {
-            onAudioData(buffer);
+            onAudioData(pcmBuffer.buffer);
         }
       };
 

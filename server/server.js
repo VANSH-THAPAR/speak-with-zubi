@@ -14,6 +14,7 @@ if (!GEMINI_API_KEY) {
   console.error("❌ Error: GEMINI_API_KEY is not set in .env file");
 }
 
+// Using the v1alpha endpoint (Required for Realtime Voice / BidiGenerateContent)
 const GEMINI_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
 
 const server = app.listen(port, () => {
@@ -37,10 +38,10 @@ wss.on('connection', (clientWs) => {
   geminiWs.on('open', () => {
     console.log('🔗 Connected to Gemini API. Sending setup...');
 
-    // Send initial setup payload with strictly formatted tool parameters
     const setupMessage = {
       setup: {
-        model: "models/gemini-2.0-flash-exp", 
+        // THE CORRECT NATIVE AUDIO MODEL!
+        model: "models/gemini-2.5-flash-native-audio-latest", 
         generationConfig: {
           responseModalities: ["AUDIO"],
           speechConfig: {
@@ -50,7 +51,7 @@ wss.on('connection', (clientWs) => {
         systemInstruction: {
           parts: [
             {
-              text: "You are Zubi, a friendly cartoon elephant. A child is talking to you. Keep answers to 1 short sentence. You can perform actions like jumping, rolling, or sleeping. Say goodbye and end the chat after exactly 1 minute."
+              text: "You are Zubi, a cute, playful baby elephant. A young child is talking to you. Answer in a very happy, excited, and simple way. Keep your answers very short (1-2 sentences). Use simple words like 'Yay!', 'Fun!', and 'Wow!'. You can perform actions like jumping, rolling, or sleeping. If the child asks you to do something, do it! Always be kind and encouraging."
             }
           ]
         },
@@ -91,18 +92,18 @@ wss.on('connection', (clientWs) => {
       const strData = data.toString();
       const response = JSON.parse(strData);
 
-      // 0. Catch the Success Signal or Setup Errors
+      // 0. Setup confirmation
       if (response.setupComplete) {
         console.log("✅ Gemini Setup Complete! Ready for audio.");
         return;
       } 
       
-      // Log raw messages that aren't just normal audio packets to help debug
+      // Log errors or unexpected messages
       if (!response.serverContent && !response.setupComplete) {
         console.log("Raw Gemini Message:", strData);
       }
 
-      // 1. Relay Server Content (Audio) to Client
+      // 1. Relay Audio Content to React Frontend
       if (response.serverContent) {
         clientWs.send(JSON.stringify({ type: 'serverContent', content: response.serverContent }));
       }
@@ -114,14 +115,14 @@ wss.on('connection', (clientWs) => {
         
         if (functionCalls && functionCalls.length > 0) {
           functionCalls.forEach(call => {
-            // Forward the specific animation event to the React frontend
+            // Tell React to play the animation
             clientWs.send(JSON.stringify({
               type: 'animation',
               animation: call.name, 
               id: call.id
             }));
             
-            // Send feedback back to Gemini that the tool was "executed"
+            // Confirm back to Gemini that the animation played
             const toolResponse = {
               toolResponse: {
                 functionResponses: [
@@ -143,8 +144,8 @@ wss.on('connection', (clientWs) => {
     }
   });
 
-  geminiWs.on('close', () => {
-    console.log('🔌 Gemini connection closed');
+  geminiWs.on('close', (code, reason) => {
+    console.log(`🔌 Gemini connection closed: code=${code}, reason=${reason}`);
     clientWs.close();
   });
 
@@ -153,17 +154,15 @@ wss.on('connection', (clientWs) => {
     clientWs.close();
   });
 
-  // Relay messages from React Client -> Gemini
   clientWs.on('message', (message) => {
     if (!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
 
-    // Handle Binary Audio Data from Client
     if (Buffer.isBuffer(message)) {
       const audioMessage = {
         realtimeInput: {
           mediaChunks: [
             {
-              mimeType: "audio/pcm;rate=16000", // Standard rate for Web Audio capture
+              mimeType: "audio/pcm;rate=16000",
               data: message.toString('base64')
             }
           ]
@@ -171,15 +170,6 @@ wss.on('connection', (clientWs) => {
       };
       geminiWs.send(JSON.stringify(audioMessage));
     } 
-    else {
-      // Handle any text/JSON control messages from the client if needed later
-      try {
-        const parsed = JSON.parse(message);
-        // We can add logic here later if the client needs to send text messages
-      } catch (e) {
-        // Ignore non-JSON text
-      }
-    }
   });
 
   clientWs.on('close', () => {

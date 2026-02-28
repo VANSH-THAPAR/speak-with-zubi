@@ -104,24 +104,36 @@ function App() {
   };
 
   const queueAudioChunk = async (base64Data) => {
-    const binaryString = window.atob(base64Data);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    const arrayBuffer = bytes.buffer;
-
     try {
         if (!audioContextRef.current) return;
-        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+        
+        const binaryString = window.atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Convert to 16-bit PCM (Little Endian)
+        const int16Data = new Int16Array(bytes.buffer);
+        const float32Data = new Float32Array(int16Data.length);
+        
+        // Convert int16 to float32 (-1.0 to 1.0)
+        for (let i = 0; i < int16Data.length; i++) {
+            float32Data[i] = int16Data[i] / 32768.0;
+        }
+
+        // Create AudioBuffer (rate must match server config, usually 24000)
+        const audioBuffer = audioContextRef.current.createBuffer(1, float32Data.length, 24000);
+        audioBuffer.getChannelData(0).set(float32Data);
+        
         audioQueueRef.current.push(audioBuffer);
         
         if (!isPlayingRef.current) {
             playNextChunk();
         }
     } catch (e) {
-        console.error("Error decoding audio chunk:", e);
+        console.error("Error processing audio chunk:", e);
     }
   };
 
@@ -157,17 +169,15 @@ function App() {
                 if (message.type === 'animation') {
                     triggerAnimation(message.animation);
                 }
-                else if (message.type === 'audio' || message.type === 'serverContent') {
-                    const contentValues = message.data || message.content;
-                     if (contentValues?.serverContent?.modelTurn?.parts) {
-                        for (const part of contentValues.serverContent.modelTurn.parts) {
+                else if (message.type === 'serverContent') {
+                    const contentValues = message.content;
+                    if (contentValues?.modelTurn?.parts) {
+                        for (const part of contentValues.modelTurn.parts) {
                             if (part.inlineData && part.inlineData.mimeType.startsWith('audio')) {
                                 queueAudioChunk(part.inlineData.data);
                             }
                         }
-                     } else if (contentValues?.audioContent) {
-                         queueAudioChunk(contentValues.audioContent);
-                     }
+                    } 
                 }
             } catch (e) {
                 console.error("Error parsing WS message", e);
