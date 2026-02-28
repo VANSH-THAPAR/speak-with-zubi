@@ -10,7 +10,6 @@ const ANIMATIONS = {
   TALK: 'a10b0855f5834b2d9bac33ba2dd35948',
   WALK: '7ae8e0f43a904d6c85cac6a36f708338',
   RUN: '9dd80f3ab1ba4596820fa83970e7b507',
-  ROLL: 'b5f260babc5644d8a28996a4d7e9a89',
   JUMP_UP: '5c1dac80c2ca478f8afd9a04a80ca7bb',
   FALL: '7814ef0da1c94210aab4c2cd6f5e0004',
   LAND: 'c184dda2155544a9bec2bece95f0aeec',
@@ -32,6 +31,11 @@ function App() {
   const sequenceQueueRef = useRef([]);
 
   const [status, setStatus] = useState('Disconnected');
+  const [isAsleep, setIsAsleep] = useState(false);
+  const isAsleepRef = useRef(false);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const sessionStartedRef = useRef(false);
 
   // --- Animation Helpers ---
 
@@ -44,12 +48,14 @@ function App() {
               console.error("Set animation error", err);
               return;
           }
-          // 'one' means play the current animation.
-          // We set 'one' to stick to this animation.
-          // Sketchfab 1.12.1 loops the current animation if passing 'one'.
-          // To NOT loop (play once), we rely on 'animationEnded' to switch away.
-          apiRef.current.setCycleMode('one'); 
-          apiRef.current.play();
+          // Set to loop if requested, otherwise play once
+          apiRef.current.setCycleMode(loop ? 'loop' : 'one'); 
+          
+          if (uid === ANIMATIONS.IDLE) {
+              apiRef.current.pause(); // Freeze exactly on the idle frame 
+          } else {
+              apiRef.current.play();
+          }
       });
   }, []);
 
@@ -57,7 +63,7 @@ function App() {
   const playSequence = useCallback((uids) => {
       if (!uids || uids.length === 0) return;
       
-      // The sequence is the provided list + IDLE at the end to reset
+      // The sequence is the provided list + IDLE at the end to reset and freeze
       // We take the first one to play now, and push the REST + IDLE to the queue.
       const [first, ...rest] = uids;
       sequenceQueueRef.current = [...rest, ANIMATIONS.IDLE];
@@ -66,21 +72,58 @@ function App() {
       playAnimation(first, false); 
   }, [playAnimation]);
 
-  // Play a single animation once, then go back to Idle
+  // Play a single animation once, then go back to frozen Idle
   const playOneShot = useCallback((uid) => {
-      // Just a sequence of [UID, IDLE] - Playing UID once, then reverting to Idle
+      // Just a sequence of [UID, IDLE] - Playing UID once, then reverting to Idle Freeze
       sequenceQueueRef.current = [ANIMATIONS.IDLE];
       playAnimation(uid, false);
   }, [playAnimation]);
 
 
+  // --- Session Timer Logic ---
+  useEffect(() => {
+    let timer;
+    if (isSessionActive && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0 && isSessionActive) {
+      // 60-second limit reached, completely end the session
+      setIsSessionActive(false);
+      setIsAsleep(true);
+      isAsleepRef.current = true;
+      
+      // Tell Zubi to perform the sleep animation and clear the queue so he stays asleep
+      playAnimation(ANIMATIONS.SLEEP, true);
+      sequenceQueueRef.current = [];
+      audioQueueRef.current = [];
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+    }
+    return () => clearInterval(timer);
+  }, [isSessionActive, timeLeft, playAnimation]);
+
+  // Trigger farewell at 55 seconds (when 5 seconds are left)
+  useEffect(() => {
+    if (isSessionActive && timeLeft === 5) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log("55 seconds elapsed, triggering farewell.");
+        wsRef.current.send(JSON.stringify({ type: 'forceFarewell' }));
+      }
+    }
+  }, [timeLeft, isSessionActive]);
+
   // --- Audio Logic ---
   const playNextChunk = () => {
       if (audioQueueRef.current.length === 0) {
           isPlayingRef.current = false;
-          // If we finished talking and NOT in a sequence, go to Idle
-          if (sequenceQueueRef.current.length === 0) {
-              playAnimation(ANIMATIONS.IDLE, true);
+          // If we finished talking and NOT in a sequence, go to idle pause
+          // Make sure we aren't asleep
+          if (sequenceQueueRef.current.length === 0 && !isAsleepRef.current) {
+              playAnimation(ANIMATIONS.IDLE, false);
+              if (apiRef.current) apiRef.current.pause();
           }
           return;
       }
@@ -91,8 +134,8 @@ function App() {
       source.buffer = buffer;
       source.connect(audioContextRef.current.destination);
 
-      // Only switch to TALK if we are not busy with a sequence (like jumping)
-      if (sequenceQueueRef.current.length === 0) {
+      // Only switch to TALK if we are not busy with a sequence (like jumping) and not sleeping
+      if (sequenceQueueRef.current.length === 0 && !isAsleepRef.current) {
           playAnimation(ANIMATIONS.TALK, true);
       }
 
@@ -143,14 +186,15 @@ function App() {
   const triggerAnimation = useCallback((toolName) => {
       if (toolName === 'trigger_jump') {
           playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND]);
-      } else if (toolName === 'trigger_roll') {
-          playOneShot(ANIMATIONS.ROLL);
       } else if (toolName === 'trigger_sleep') {
-          playOneShot(ANIMATIONS.SLEEP);
+          playAnimation(ANIMATIONS.SLEEP, true);
+          sequenceQueueRef.current = []; // Ensure we don't go back to IDLE
+          setIsAsleep(true);
+          isAsleepRef.current = true;
       } else if (toolName === 'trigger_success') {
           playOneShot(ANIMATIONS.SUCCESS);
       }
-  }, [playSequence, playOneShot]);
+  }, [playSequence, playOneShot, playAnimation]);
 
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:3001');
@@ -265,12 +309,18 @@ function App() {
                          
                          // Cycle mode "one" is fine as playAnimation sets it.
                          playAnimation(nextUid, true);
+                     } else if (!isAsleepRef.current && !isPlayingRef.current) {
+                         // Always go back to sleeping if asleep, 
+                         // but if awake and no audio is playing, fall back to default IDLE pose and pause him
+                         playAnimation(ANIMATIONS.IDLE, false);
+                         api.pause(); // Freeze exactly on the idle frame
                      }
                  });
 
                  // Initial State
                  api.setCycleMode('one'); 
-                 playAnimation(ANIMATIONS.IDLE, true);
+                 playAnimation(ANIMATIONS.IDLE, false);
+                 api.pause();
              });
          },
          ui_controls: 0,
@@ -302,10 +352,20 @@ function App() {
   });
 
   const handleStartRecording = async () => {
+      // Do nothing if already asleep or session is fully over
+      if (isAsleep || timeLeft <= 0) return;
+
       if (audioContextRef.current?.state === 'suspended') {
           await audioContextRef.current.resume();
       }
       startRecording();
+
+      // Start the 60 second session logic on the very first hold
+      if (!sessionStartedRef.current) {
+          sessionStartedRef.current = true;
+          setIsSessionActive(true);
+          console.log("60-second play session started!");
+      }
   };
 
   return (
@@ -326,13 +386,31 @@ function App() {
       <iframe
         ref={iframeRef}
         id="api-frame"
-        className="sketchfab-frame"
+        className={`sketchfab-frame ${isAsleep ? 'sleep-mode' : ''}`}
         allow="autoplay; fullscreen; vr"
         allowFullScreen
         mozallowfullscreen="true"
         webkitallowfullscreen="true"
         title="Zubi"
       />
+
+      {/* Floating Suggestions / Bubbles */}
+      <div className="floating-suggestions">
+        <div className="suggestion-bubble bubble-1">🎵 Ask Zubi to dance!</div>
+        <div className="suggestion-bubble bubble-2">🚀 Ask Zubi to jump!</div>
+        <div className="suggestion-bubble bubble-3">🚶 Tell Zubi to walk!</div>
+        <div className="suggestion-bubble bubble-4">💤 Tell Zubi to sleep!</div>
+        <div className="suggestion-bubble bubble-5">🏃 Ask Zubi to run!</div>
+        
+        <div className="instruction-toast">
+          ⭐ Remember: Hold the mic while talking. Please wait for Zubi's reply before speaking again!
+        </div>
+        
+        {/* Sub-instruction for 3D interaction */}
+        <div className="interact-hint-box">
+          <span className="interact-icon">👆</span> You can click & drag to spin Zubi around!
+        </div>
+      </div>
 
       {/* Footer Overlay */}
       <div className="overlay-footer">
@@ -346,9 +424,12 @@ function App() {
               onTouchStart={(e) => { e.preventDefault(); handleStartRecording(); }}
               onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
               aria-label={isRecording ? "Stop Recording" : "Start Recording"}
+              disabled={timeLeft <= 0 || isAsleep}
             >
-              {/* Mic Icon SVG */}
-              {isRecording ? (
+              {/* Show countdown timer once session starts, else show mic icon */}
+              {isSessionActive ? (
+                 <span style={{ fontSize: '28px', fontWeight: 'bold' }}>{timeLeft}</span>
+              ) : isRecording ? (
                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width: '32px', height: '32px'}}>
                     <rect x="9" y="9" width="6" height="6" />
                  </svg>
@@ -361,7 +442,9 @@ function App() {
                  </svg>
               )}
             </button>
-            <div className="record-hint">{isRecording ? "Listening..." : "Hold to Talk"}</div>
+            <div className="record-hint">
+                {timeLeft <= 0 || isAsleep ? "Playtime over! Zubi is sleeping." : isRecording ? "Listening..." : "Hold to Talk"}
+            </div>
         </div>
 
         {/* Secondary Actions: Animations */}
@@ -369,7 +452,6 @@ function App() {
             <button className="anim-btn" onClick={() => playAnimation(ANIMATIONS.IDLE)}>Idle</button>
             <button className="anim-btn" onClick={() => playAnimation(ANIMATIONS.TALK)}>Talk</button>
             <button className="anim-btn" onClick={() => playSequence([ANIMATIONS.JUMP_UP, ANIMATIONS.FALL, ANIMATIONS.LAND])}>Jump</button>
-            <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.ROLL)}>Roll</button>
             <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.SUCCESS)}>Success</button>
             <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.SLEEP)}>Sleep</button>
             <button className="anim-btn" onClick={() => playOneShot(ANIMATIONS.WALK)}>Walk</button>

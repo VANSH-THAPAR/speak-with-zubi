@@ -51,7 +51,7 @@ wss.on('connection', (clientWs) => {
         systemInstruction: {
           parts: [
             {
-              text: "You are Zubi, a cute, playful baby elephant. A young child is talking to you. Answer in a very happy, excited, and simple way. Keep your answers very short (1-2 sentences). Use simple words like 'Yay!', 'Fun!', and 'Wow!'. You can perform actions like jumping, rolling, or sleeping. If the child asks you to do something, do it! Always be kind and encouraging."
+              text: "You are Zubi, a cute, playful baby elephant. A young child is talking to you. Answer in a very happy, excited, and simple way. Keep your answers very short (1-2 sentences). Use simple words like 'Yay!', 'Fun!', and 'Wow!'. You can perform actions like jumping, or sleeping. If the child asks you to do something, do it! Always be kind and encouraging."
             }
           ]
         },
@@ -61,11 +61,6 @@ wss.on('connection', (clientWs) => {
               {
                 name: "trigger_jump",
                 description: "Triggers the elephant to jump in excitement.",
-                parameters: { type: "OBJECT", properties: {} } 
-              },
-              {
-                name: "trigger_roll",
-                description: "Triggers the elephant to roll on the ground.",
                 parameters: { type: "OBJECT", properties: {} } 
               },
               {
@@ -169,7 +164,30 @@ wss.on('connection', (clientWs) => {
         }
       };
       geminiWs.send(JSON.stringify(audioMessage));
-    } 
+    } else {
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed.type === 'forceFarewell') {
+          console.log("Sending farewell trigger to Gemini...");
+          const textMessage = {
+             clientContent: {
+                 turns: [
+                     {
+                         role: "user",
+                         parts: [
+                             { text: "The play session is ending right now. Stop what you are doing. Say EXACTLY 'It's my time to sleep, good bye!' and do NOT say anything else. Then immediately use the trigger_sleep tool." }
+                         ]
+                     }
+                 ],
+                 turnComplete: true
+             }
+          };
+          geminiWs.send(JSON.stringify(textMessage));
+        }
+      } catch (e) {
+        // Ignored
+      }
+    }
   });
 
   clientWs.on('close', () => {
