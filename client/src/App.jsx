@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import './App.css';
 import { useAudioRecorder } from './useAudioRecorder';
+import goodbyeBase64 from './assets/goodbye.txt?raw';
 
 // Animation UIDs
 const ANIMATIONS = {
@@ -29,6 +30,7 @@ function App() {
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const sequenceQueueRef = useRef([]);
+  const currentAnimationRef = useRef(null);
 
   const [status, setStatus] = useState('Disconnected');
   const [isAsleep, setIsAsleep] = useState(false);
@@ -42,7 +44,10 @@ function App() {
   // Basic play function
   const playAnimation = useCallback((uid, loop = true) => {
       if (!apiRef.current) return;
+      if (currentAnimationRef.current === uid) return; // Prevent restarting same animation
       
+      currentAnimationRef.current = uid;
+
       apiRef.current.setCurrentAnimationByUID(uid, (err) => {
           if (err) {
               console.error("Set animation error", err);
@@ -88,16 +93,12 @@ function App() {
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0 && isSessionActive) {
-      // 60-second limit reached, completely end the session
+      // Emergency fallback if for some reason it hits 0 without farewell catching it
       setIsSessionActive(false);
       setIsAsleep(true);
       isAsleepRef.current = true;
-      
-      // Tell Zubi to perform the sleep animation and clear the queue so he stays asleep
       playAnimation(ANIMATIONS.SLEEP, true);
       sequenceQueueRef.current = [];
-      audioQueueRef.current = [];
-
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
@@ -105,15 +106,81 @@ function App() {
     return () => clearInterval(timer);
   }, [isSessionActive, timeLeft, playAnimation]);
 
-  // Trigger farewell at 55 seconds (when 5 seconds are left)
+  // Guaranteed farewell at 55 seconds (when 5 seconds are left)
   useEffect(() => {
     if (isSessionActive && timeLeft === 5) {
+      console.log("55 seconds elapsed, executing force farewell locally.");
+      
+      // Stop the timer from ticking further normally here
+      setIsSessionActive(false); 
+      
+      // 1. Cut off current Gemini connection so he stops whatever he's saying
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        console.log("55 seconds elapsed, triggering farewell.");
-        wsRef.current.send(JSON.stringify({ type: 'forceFarewell' }));
+        wsRef.current.close();
       }
+      
+      // 2. Clear any pending Gemini audio chunks and silence active audio
+      audioQueueRef.current = [];
+      if (audioContextRef.current && audioContextRef.current.state === 'running') {
+          audioContextRef.current.suspend();
+      }
+      
+      // 3. Make him "talk"
+      sequenceQueueRef.current = [];
+      isAsleepRef.current = false;
+      setIsAsleep(false);
+      playAnimation(ANIMATIONS.TALK, true);
+
+      // 4. Decode the offline AI voice goodbye 
+      const playGoodbye = async () => {
+         if (!audioContextRef.current) return;
+         if (audioContextRef.current.state === 'suspended') {
+             await audioContextRef.current.resume();
+         }
+         
+         const binaryString = window.atob(goodbyeBase64);
+         const len = binaryString.length;
+         const bytes = new Uint8Array(len);
+         for (let i = 0; i < len; i++) {
+             bytes[i] = binaryString.charCodeAt(i);
+         }
+         
+         const int16Data = new Int16Array(bytes.buffer);
+         const float32Data = new Float32Array(int16Data.length);
+         for (let i = 0; i < int16Data.length; i++) {
+             float32Data[i] = int16Data[i] / 32768.0;
+         }
+
+         const audioBuffer = audioContextRef.current.createBuffer(1, float32Data.length, 24000);
+         audioBuffer.getChannelData(0).set(float32Data);
+         
+         const source = audioContextRef.current.createBufferSource();
+         source.buffer = audioBuffer;
+         source.connect(audioContextRef.current.destination);
+         
+         source.onended = () => {
+             playAnimation(ANIMATIONS.SLEEP, true);
+             setIsAsleep(true);
+             isAsleepRef.current = true;
+             setTimeLeft(0); 
+         };
+         
+         source.start();
+      };
+      
+      playGoodbye();
+
+      // In case audio playback fails, force sleep after 3 seconds fallback
+      setTimeout(() => {
+         if (!isAsleepRef.current) {
+             playAnimation(ANIMATIONS.SLEEP, true);
+             setIsAsleep(true);
+             isAsleepRef.current = true;
+             setTimeLeft(0);
+         }
+      }, 3500);
     }
-  }, [timeLeft, isSessionActive]);
+  }, [timeLeft, isSessionActive, playAnimation]);
 
   // --- Audio Logic ---
   const playNextChunk = () => {
