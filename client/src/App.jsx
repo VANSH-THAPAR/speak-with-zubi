@@ -197,7 +197,9 @@ function App() {
   }, [playSequence, playOneShot, playAnimation]);
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:3001');
+    // Read backend URL from environment variables, fallback if not set
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'ws://localhost:3001';
+    const ws = new WebSocket(backendUrl);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {

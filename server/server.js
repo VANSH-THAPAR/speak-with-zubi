@@ -6,7 +6,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
 
 // Ensure API key is present
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
