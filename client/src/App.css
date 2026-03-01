@@ -447,7 +447,7 @@ body, html {
 
 .interact-hint-box {
   position: absolute;
-  top: 25%; /* Aligned beautifully with bubble-1 on the left */
+  top: 40%; /* Aligned beautifully with bubble-1 on the left */
   right: 5%;
   transform: none; /* No translateX needed since it's on the right */
   background: linear-gradient(135deg, #00b4d8 0%, #0077b6 100%);

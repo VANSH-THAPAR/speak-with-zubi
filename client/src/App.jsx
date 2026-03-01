@@ -466,9 +466,8 @@ function App() {
       {/* Floating Suggestions / Bubbles */}
       <div className="floating-suggestions">
         <div className="suggestion-bubble bubble-1">🎵 Ask Zubi to dance!</div>
-        <div className="suggestion-bubble bubble-2">🚀 Ask Zubi to jump!</div>
         <div className="suggestion-bubble bubble-3">🚶 Tell Zubi to walk!</div>
-        <div className="suggestion-bubble bubble-4">💤 Tell Zubi to sleep!</div>
+        <div className="suggestion-bubble bubble-4">💤 Tell Zubi to jump!</div>
         <div className="suggestion-bubble bubble-5">🏃 Ask Zubi to run!</div>
         
         <div className="instruction-toast">
