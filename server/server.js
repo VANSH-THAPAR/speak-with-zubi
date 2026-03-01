@@ -1,12 +1,41 @@
 const express = require('express');
 const WebSocket = require('ws');
 const dotenv = require('dotenv');
+const http = require('http');
+const https = require('https');
 
 // Load environment variables from .env file
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3001;
+
+// --- Render Keep-Alive Route ---
+app.get('/keepalive', (req, res) => {
+    res.status(200).send('Server is alive!');
+});
+
+// Self-ping every 14 minutes (840,000 milliseconds)
+setInterval(() => {
+    const backendUrl = process.env.BACKEND_URL;
+    if (!backendUrl) return; 
+
+    const url = `${backendUrl}/keepalive`;
+    console.log(`Pinging self at ${url} to keep Render instance awake...`);
+
+    const lib = url.startsWith('https') ? https : http;
+    
+    lib.get(url, (res) => {
+        if (res.statusCode === 200) {
+            console.log('Keep-alive ping successful.');
+        } else {
+            console.log(`Keep-alive ping failed with status: ${res.statusCode}`);
+        }
+    }).on('error', (err) => {
+        console.error('Keep-alive ping error:', err.message);
+    });
+}, 840_000);
+// -----------------------------
 
 // Ensure API key is present
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
