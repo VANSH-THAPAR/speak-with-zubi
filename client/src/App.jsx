@@ -489,8 +489,11 @@ function App() {
               className={`record-button ${isRecording ? 'recording' : ''}`}
               onMouseDown={handleStartRecording} 
               onMouseUp={stopRecording}
+              onMouseLeave={stopRecording}
               onTouchStart={(e) => { e.preventDefault(); handleStartRecording(); }}
               onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+              onTouchCancel={(e) => { e.preventDefault(); stopRecording(); }}
+              onContextMenu={(e) => { e.preventDefault(); }}
               aria-label={isRecording ? "Stop Recording" : "Start Recording"}
               disabled={timeLeft <= 0 || isAsleep}
             >

@@ -11,7 +11,7 @@
 
 body, html {
   width: 100%;
-  height: 100%;
+  height: 100dvh;
   overflow: hidden;
   font-family: 'Fredoka', cursive, sans-serif;
   background-color: #8ECAE6; /* Fallback */
@@ -497,17 +497,26 @@ body, html {
    📱 MOBILE RESPONSIVENESS
    ========================================= */
 @media (max-width: 768px) {
+  /* Dynamic mobile height handling */
+  body, html {
+    height: 100dvh;
+  }
+  .app-container {
+    height: 100dvh;
+  }
+  
   /* Shrink Navbar */
   .overlay-navbar {
     padding: 0 15px;
-    height: 80px;
+    height: 70px;
+    justify-content: space-between;
   }
   .brand h1 {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     text-shadow: 1px 1px 0px #0077B6, 2px 2px 0px rgba(0,0,0,0.1);
   }
   .status-badge {
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-width: 1px;
   }
   .status-text {
@@ -516,91 +525,137 @@ body, html {
 
   /* Compact the instruction toast */
   .instruction-toast {
-    font-size: 0.95rem;
-    padding: 10px 15px;
-    width: 95%;
-    border-width: 3px;
-    top: 5px; /* Stay very high up */
-  }
-
-  /* Shrink floating bubbles and hide the least important ones to free screen center */
-  .suggestion-bubble {
-    padding: 8px 16px;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
+    padding: 8px 15px;
+    width: 90%;
     border-width: 2px;
-    border-radius: 20px;
-  }
-  .suggestion-bubble::after, .suggestion-bubble::before {
-    display: none; /* Hide tails on small mobiles to save space */
-  }
-
-  /* Push remaining bubbles exclusively to extreme edges */
-  .bubble-1 { --base-top: 25%; top: 25%; left: 2%; } /* 🎵 Dance */
-  .bubble-2 { --base-top: 35%; top: 35%; right: 2%; } /* 🚀 Jump */
-  
-  /* Hide these off-screen entirely on mobile to save Zubi's view */
-  .bubble-3, .bubble-4, .bubble-5 { 
-    display: none; 
+    border-radius: 15px;
+    top: 5px; /* Stay very high up */
+    line-height: 1.3;
   }
 
-  /* Make interact box tiny and put it on bottom right above grass */
+  /* Completely hide all floating bubbles on mobile to free up screen center */
+  .suggestion-bubble {
+    display: none !important;
+  }
+
+  /* Pull interact box up from behind the grass and center it as a small pill */
   .interact-hint-box {
     top: auto;
-    bottom: 230px; 
-    right: 5%;
-    font-size: 0.85rem;
-    padding: 6px 14px;
+    bottom: 200px; 
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    font-size: 0.8rem;
+    padding: 8px 12px;
     border-width: 2px;
+    border-radius: 12px;
+    white-space: normal;
+    text-align: center;
+    width: 90%;
+    max-width: 320px;
+    justify-content: center;
+    animation: gentle-bounce 3s ease-in-out infinite alternate;
   }
   .interact-icon {
     font-size: 1.2rem;
+    flex-shrink: 0;
   }
 
   /* Adjust Footer */
   .overlay-footer {
-    height: 200px; /* Reduced grass height */
-    padding-bottom: 10px;
+    height: 190px; /* Reduced grass height */
+    padding-bottom: 5px;
+    justify-content: flex-end;
   }
   .overlay-footer::before {
     top: -20px;
     height: 40px;
   }
 
-  /* Horizontal scrolling for animation buttons */
+  /* Grid layout for animation buttons */
   .footer-buttons {
     padding: 5px 15px 10px 15px;
     gap: 8px;
-    justify-content: flex-start;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    justify-content: center;
+    flex-wrap: wrap; /* Let it wrap naturally on mobile */
+    width: 100%;
+    max-height: 90px;
+    overflow-y: auto;
   }
   
   /* Shrink animation buttons */
   .anim-btn {
-    padding: 8px 16px;
-    font-size: 0.9rem;
+    padding: 6px 12px;
+    font-size: 0.8rem;
     border-width: 2px;
-    border-radius: 15px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    min-width: calc(33% - 10px); /* 3 buttons per row roughly */
+    text-align: center;
   }
   
   /* Shrink main record button */
   .controls-container {
     gap: 5px;
+    margin-bottom: 5px;
   }
   .record-button {
-    width: 75px;
-    height: 75px;
-    border-width: 4px;
+    width: 65px;
+    height: 65px;
+    border-width: 3px;
   }
   .record-button svg {
     width: 24px !important;
     height: 24px !important;
   }
+  
+  /* Make countdown match small button */
+  .record-button span {
+    font-size: 20px !important;
+  }
+  
   .record-hint {
-    font-size: 0.85rem;
-    padding: 4px 12px;
+    font-size: 0.75rem;
+    padding: 4px 10px;
     border-width: 1px;
+    border-radius: 15px;
+  }
+}
+
+/* For Extra Small Mobile Screens */
+@media (max-width: 480px) {
+  .brand h1 {
+    font-size: 1.15rem;
+  }
+  .overlay-navbar {
+    padding: 0 10px;
+  }
+  .interact-hint-box {
+    bottom: 195px;
+    font-size: 0.75rem;
+    padding: 6px 10px;
+    max-width: 280px;
+    gap: 8px;
+  }
+  .overlay-footer {
+    height: 180px;
+  }
+  .record-button {
+    width: 60px;
+    height: 60px;
+  }
+  .record-hint {
+    font-size: 0.7rem;
+  }
+  .instruction-toast {
+    font-size: 0.75rem;
+    padding: 6px 12px;
+  }
+  .anim-btn {
+    min-width: calc(33% - 8px); 
+    padding: 6px 8px;
+    font-size: 0.75rem;
   }
 }
 
