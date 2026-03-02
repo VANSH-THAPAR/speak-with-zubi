@@ -471,7 +471,7 @@ function App() {
         <div className="suggestion-bubble bubble-5">🏃 Ask Zubi to run!</div>
         
         <div className="instruction-toast">
-          ⭐ Remember: Hold the mic while talking. Please wait for Zubi's reply before speaking again!
+          ⭐ Remember: Wait for a minute to get backend connected and once its connected hold the mic while talking. Please wait for Zubi's reply before speaking again!
         </div>
         
         {/* Sub-instruction for 3D interaction */}
